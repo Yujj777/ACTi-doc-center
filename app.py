@@ -945,30 +945,31 @@ def render_missing_info_banner(
     left: 0;
     right: 0;
     z-index: 9999;
-    background: rgba(255, 255, 255, 0.96);
+    background: rgba(220, 38, 38, 0.8);
     backdrop-filter: blur(6px);
-    border-bottom: 1px solid rgba(49, 51, 63, 0.15);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
     padding: 0.75rem 1rem;
+    text-align: center;
   }}
   @media (prefers-color-scheme: dark) {{
     .missing-info-fixed {{
-      background: rgba(14, 17, 23, 0.92);
-      border-bottom: 1px solid rgba(250, 250, 250, 0.12);
+      background: rgba(220, 38, 38, 0.8);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.18);
     }}
   }}
   .mib-ok {{
-    color: #067d1f;
+    color: rgba(255, 255, 255, 0.96);
     font-weight: 700;
     line-height: 1.35;
   }}
   .mib-warn {{
-    color: #8a3b00;
-    font-weight: 600;
+    color: rgba(255, 255, 255, 0.96);
+    font-weight: 700;
     line-height: 1.35;
   }}
 </style>
 <div class="missing-info-fixed">
-  <div style="font-weight:800; margin-bottom:0.25rem;">缺漏資料提示</div>
+  <div style="font-weight:900; margin-bottom:0.25rem;">缺漏資料提示</div>
   {body_html}
 </div>
 """,
