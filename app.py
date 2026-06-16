@@ -875,36 +875,11 @@ def render_missing_info_tracker(
     cart: list,
 ) -> None:
     """缺漏資料提示區塊（Missing Info Tracker）。"""
-    # Sticky banner so missing-info stays visible while scrolling.
-    st.markdown(
-        """
-<style>
-  .missing-info-sticky {
-    position: sticky;
-    top: 0;
-    z-index: 999;
-    background: rgba(255, 255, 255, 0.96);
-    backdrop-filter: blur(4px);
-    border-bottom: 1px solid rgba(49, 51, 63, 0.15);
-    padding: 0.75rem 0.75rem 0.25rem 0.75rem;
-    margin: -0.75rem -0.75rem 0.75rem -0.75rem;
-  }
-  @media (prefers-color-scheme: dark) {
-    .missing-info-sticky {
-      background: rgba(14, 17, 23, 0.92);
-      border-bottom: 1px solid rgba(250, 250, 250, 0.12);
-    }
-  }
-</style>
-""",
-        unsafe_allow_html=True,
-    )
-    st.markdown("<div class='missing-info-sticky'>", unsafe_allow_html=True)
+    # Legacy: kept for backward compatibility. New UI uses render_missing_info_banner()
     st.subheader("缺漏資料提示")
     n_sel = len(selected_template_paths) + len(selected_declarations)
     if n_sel == 0:
         st.info("請於「區塊二：文件類型選擇」勾選至少一份要產生的文件。")
-        st.markdown("</div>", unsafe_allow_html=True)
         return
 
     issues = collect_validation_issues(
@@ -916,13 +891,89 @@ def render_missing_info_tracker(
     )
     if not issues:
         st.success("所有資料已就緒，可進行預覽與下載！")
-        st.markdown("</div>", unsafe_allow_html=True)
         return
 
     for doc_label, missing in issues:
         miss_txt = "、".join(missing)
         st.warning(f"要生成【{doc_label}】，您還缺少：{miss_txt}。")
-    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_missing_info_banner(
+    slot,
+    *,
+    selected_template_paths: list[str],
+    selected_declarations: list[str],
+    use_unit: str,
+    vendor_name: str,
+    cart: list,
+) -> None:
+    """
+    浮動頂端提示條：永遠出現在頁面最上方，不佔用頁面內容區塊高度。
+    """
+    n_sel = len(selected_template_paths) + len(selected_declarations)
+    if n_sel == 0:
+        slot.empty()
+        return
+
+    issues = collect_validation_issues(
+        selected_template_paths=selected_template_paths,
+        selected_declarations=selected_declarations,
+        use_unit=use_unit,
+        vendor_name=vendor_name,
+        cart=cart,
+    )
+
+    if not issues:
+        body_html = "<div class='mib-ok'>所有資料已就緒，可進行預覽與下載！</div>"
+    else:
+        lines = []
+        for doc_label, missing in issues:
+            miss_txt = "、".join(missing)
+            lines.append(f"<div class='mib-warn'>要生成【{escape(str(doc_label))}】，您還缺少：{escape(str(miss_txt))}。</div>")
+        body_html = "".join(lines)
+
+    slot.markdown(
+        f"""
+<style>
+  /* Give space so banner doesn't cover the first widgets */
+  .stApp {{
+    padding-top: 72px;
+  }}
+  .missing-info-fixed {{
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 9999;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid rgba(49, 51, 63, 0.15);
+    padding: 0.75rem 1rem;
+  }}
+  @media (prefers-color-scheme: dark) {{
+    .missing-info-fixed {{
+      background: rgba(14, 17, 23, 0.92);
+      border-bottom: 1px solid rgba(250, 250, 250, 0.12);
+    }}
+  }}
+  .mib-ok {{
+    color: #067d1f;
+    font-weight: 700;
+    line-height: 1.35;
+  }}
+  .mib-warn {{
+    color: #8a3b00;
+    font-weight: 600;
+    line-height: 1.35;
+  }}
+</style>
+<div class="missing-info-fixed">
+  <div style="font-weight:800; margin-bottom:0.25rem;">缺漏資料提示</div>
+  {body_html}
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 def _empty_cart_preview_dataframe(show_qty: bool, show_warranty: bool) -> pd.DataFrame:
@@ -1342,6 +1393,8 @@ def main():
     product_db_candidates = ["產品資料庫.xlsx", "model_list.xlsx"]
 
     st.title("ACTi 文件自動生成中心")
+    # Floating (fixed) banner slot; filled later once selections are known.
+    missing_banner_slot = st.empty()
 
     # Excel 路徑防呆（優先：資料庫&文件範本/；fallback：原目錄）
     product_db_path = None
@@ -1495,18 +1548,14 @@ def main():
         st.session_state.selected_template_paths = selected_template_paths
         st.session_state.selected_declarations = selected_declarations
 
-        try:
-            _miss_ctx = st.container(border=True)
-        except TypeError:
-            _miss_ctx = st.container()
-        with _miss_ctx:
-            render_missing_info_tracker(
-                selected_template_paths=selected_template_paths,
-                selected_declarations=selected_declarations,
-                use_unit=use_unit,
-                vendor_name=vendor_name,
-                cart=st.session_state.cart_products,
-            )
+        render_missing_info_banner(
+            missing_banner_slot,
+            selected_template_paths=selected_template_paths,
+            selected_declarations=selected_declarations,
+            use_unit=use_unit,
+            vendor_name=vendor_name,
+            cart=st.session_state.cart_products,
+        )
 
         st.subheader("區塊三：產品明細(動態購物車)")
 
