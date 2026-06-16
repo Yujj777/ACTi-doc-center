@@ -1,0 +1,30 @@
+使用單位/廠商名稱
+{% if use_unit and use_unit.strip() %}
+{{ use_unit }}
+{% else %}
+{{ vendor_name }}
+{% endif %}
+
+產品表格
+{{產品表格}}
+
+使用單位
+{{ use_unit }}
+
+廠商名稱
+{{ vendor_name }}
+
+案件名稱
+{{project_name}}
+
+案件編號
+{{project_no}}
+
+經銷商名稱
+{{distributor}}
+
+其他資訊
+{{other_info}}
+
+產品型號
+{% for p in products %}{{ p.Model }}{% if not loop.last %},{% endif %}{% endfor %}

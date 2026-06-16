@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+
+# Local browser/profile artifacts (may include keys)
+chrome_profile/
+
+# Excel outputs / local data artifacts (adjust if you want versioned samples)
+Product_output*.xlsx
+Product.xlsx
+*.xlsx
+
+# Streamlit
+.streamlit/
+
+# Nested clone (separate repo: github.com/Yujj777/ACTi-doc-center)
+ACTi-doc-center/
+
+# OS
+.DS_Store
+Thumbs.db
+

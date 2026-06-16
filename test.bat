@@ -1,0 +1,1 @@
+"C:/Users/violet.su.ACTIAD/AppData/Local/Microsoft/WindowsApps/python3.13.exe" -m streamlit run "c:/Users/violet.su.ACTIAD/OneDrive - 建騰創達科技股份有限公司/文件/Cursor/ACTi_Doc_Generator/app.py" --server.port 8501
