@@ -1437,15 +1437,20 @@ def main():
         except Exception:
             declaration_df = None
 
-    col_form, col_preview, col_buttons = st.columns([4, 4, 1])
+    # Two-column layout: make preview area wider; download actions live in preview header.
+    col_form, col_preview = st.columns([4, 6])
 
     # 三欄頂部標題同一水平線（字級一致）
     with col_form:
         st.markdown("### 區塊一：基本資訊")
     with col_preview:
-        st.markdown("### PDF 即時預覽")
-    with col_buttons:
-        st.markdown("### 檔案下載")
+        # Header row: title (left) + download button (right)
+        _pv_head_left, _pv_head_right = st.columns([5, 1])
+        with _pv_head_left:
+            st.markdown("### PDF 即時預覽")
+        with _pv_head_right:
+            # Filled later once rendered_results + selection are available
+            _dl_btn_slot = st.empty()
 
     chosen_date = date.today()
 
@@ -1507,9 +1512,6 @@ def main():
                 key="pdf_preview_pick",
                 disabled=True,
             )
-
-    with col_buttons:
-        st.caption("勾選文件並產生後可下載")
 
     with col_form:
         st.subheader("區塊二：文件類型選擇")
@@ -1660,6 +1662,30 @@ def main():
 
     # 中欄：PDF 即時預覽（選擇預覽文件之下拉選單已置於標題正下方，與左欄第一列對齊）
     with col_preview:
+        # --- Download Word button (top-right of preview header) ---
+        sel_paths_btn = st.session_state.get("selected_template_paths", []) or []
+        decl_sel_btn = st.session_state.get("selected_declarations", []) or []
+        decl_lbl_btn = f"{','.join(decl_sel_btn)}自我宣告" if decl_sel_btn else None
+        pick_btn = st.session_state.get("pdf_preview_pick") or ""
+        r_key_btn = result_key_for_preview_pick(pick_btn, decl_lbl_btn, decl_sel_btn, sel_paths_btn)
+        payload_btn = rendered_results.get(r_key_btn) if r_key_btn else None
+
+        if payload_btn:
+            docx_b = payload_btn["bytes"]
+            base_stem = Path(payload_btn["filename"]).stem
+            with _pv_head_right:
+                st.download_button(
+                    label="下載 Word",
+                    data=docx_b,
+                    file_name=f"{base_stem}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                    key="pv_dl_docx",
+                )
+        else:
+            with _pv_head_right:
+                st.button("下載 Word", disabled=True, use_container_width=True, key="pv_dl_docx_disabled")
+
         selected_paths = st.session_state.get("selected_template_paths", []) or []
         decl_selected = st.session_state.get("selected_declarations", []) or []
         decl_label = None
@@ -1792,74 +1818,25 @@ def main():
                 height=780,
             )
         else:
-            st.markdown(
-                "<div style='height:760px;background:#fff;border:1px dashed #e5e7eb;border-radius:10px;'></div>",
-                unsafe_allow_html=True,
-            )
+            # Cloud fallback: show a simple HTML preview (no PDF conversion available)
+            live_df = _cart_to_editor_dataframe(st.session_state.cart_products, False, False)
+            preview_html = build_live_preview_html(vendor_name, project_name, chosen_date, live_df)
+            st.components.v1.html(preview_html, height=780, scrolling=True)
 
-    # 右欄：依「選擇預覽文件」下載 Word / PDF / PNG；最下方為多份 ZIP
-    with col_buttons:
-        sel_paths_btn = st.session_state.get("selected_template_paths", []) or []
-        decl_sel_btn = st.session_state.get("selected_declarations", []) or []
-        decl_lbl_btn = f"{','.join(decl_sel_btn)}自我宣告" if decl_sel_btn else None
-        pick_btn = st.session_state.get("pdf_preview_pick") or ""
-        r_key_btn = result_key_for_preview_pick(pick_btn, decl_lbl_btn, decl_sel_btn, sel_paths_btn)
-        payload_btn = rendered_results.get(r_key_btn) if r_key_btn else None
-
-        if not payload_btn:
-            st.caption("請在左側勾選要產生的文件；一般模板需加入購物車後才可下載。")
-        else:
-            docx_b = payload_btn["bytes"]
-            base_stem = Path(payload_btn["filename"]).stem
-            st.download_button(
-                label="下載 Word",
-                data=docx_b,
-                file_name=f"{base_stem}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
-                key="col_dl_docx",
-            )
-            pdf_b, pdf_err = docx_bytes_to_pdf_bytes(docx_b)
-            if pdf_b:
-                st.download_button(
-                    label="下載 PDF",
-                    data=pdf_b,
-                    file_name=f"{base_stem}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                    key="col_dl_pdf",
-                )
-            else:
-                st.caption(pdf_err or "無法產生 PDF")
-            if pdf_b:
-                png_b, png_err = pdf_bytes_to_png_bytes(pdf_b)
-            else:
-                png_b, png_err = None, None
-            if png_b:
-                st.download_button(
-                    label="下載 PNG",
-                    data=png_b,
-                    file_name=f"{base_stem}.png",
-                    mime="image/png",
-                    use_container_width=True,
-                    key="col_dl_png",
-                )
-            elif pdf_b:
-                st.caption(png_err or "無法產生 PNG")
-
-        st.divider()
+        # Multiple-doc bundle (DOCX ZIP) stays under preview.
         if len(rendered_results) > 1:
+            st.divider()
             zip_buffer = BytesIO()
             with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
                 for _k, payload in rendered_results.items():
                     zf.writestr(payload["filename"], payload["bytes"])
             st.download_button(
-                label="下載多份文件壓縮檔 (word)",
+                label="下載多份文件壓縮檔 (Word)",
                 data=zip_buffer.getvalue(),
                 file_name="ACTi_文件包.zip",
                 mime="application/zip",
                 use_container_width=True,
-                key="col_dl_zip_bundle",
+                key="pv_dl_zip_bundle",
             )
 
 
