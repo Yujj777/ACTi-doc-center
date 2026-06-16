@@ -875,10 +875,36 @@ def render_missing_info_tracker(
     cart: list,
 ) -> None:
     """缺漏資料提示區塊（Missing Info Tracker）。"""
+    # Sticky banner so missing-info stays visible while scrolling.
+    st.markdown(
+        """
+<style>
+  .missing-info-sticky {
+    position: sticky;
+    top: 0;
+    z-index: 999;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(4px);
+    border-bottom: 1px solid rgba(49, 51, 63, 0.15);
+    padding: 0.75rem 0.75rem 0.25rem 0.75rem;
+    margin: -0.75rem -0.75rem 0.75rem -0.75rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    .missing-info-sticky {
+      background: rgba(14, 17, 23, 0.92);
+      border-bottom: 1px solid rgba(250, 250, 250, 0.12);
+    }
+  }
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+    st.markdown("<div class='missing-info-sticky'>", unsafe_allow_html=True)
     st.subheader("缺漏資料提示")
     n_sel = len(selected_template_paths) + len(selected_declarations)
     if n_sel == 0:
         st.info("請於「區塊二：文件類型選擇」勾選至少一份要產生的文件。")
+        st.markdown("</div>", unsafe_allow_html=True)
         return
 
     issues = collect_validation_issues(
@@ -890,11 +916,13 @@ def render_missing_info_tracker(
     )
     if not issues:
         st.success("所有資料已就緒，可進行預覽與下載！")
+        st.markdown("</div>", unsafe_allow_html=True)
         return
 
     for doc_label, missing in issues:
         miss_txt = "、".join(missing)
         st.warning(f"要生成【{doc_label}】，您還缺少：{miss_txt}。")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def _empty_cart_preview_dataframe(show_qty: bool, show_warranty: bool) -> pd.DataFrame:
@@ -1027,6 +1055,11 @@ def docx_bytes_to_pdf_bytes(docx_bytes: bytes) -> tuple[bytes | None, str | None
     將 docx 轉成 PDF bytes（docx2pdf，通常需本機安裝 Microsoft Word）。
     回傳 (pdf_bytes, 錯誤說明)；成功時錯誤說明為 None。
     """
+    # Streamlit Cloud runs on Linux; docx2pdf relies on Microsoft Word (Windows/macOS).
+    # Avoid confusing "pip install docx2pdf" prompts on Cloud where it won't work anyway.
+    import sys
+    if sys.platform not in ("win32", "darwin"):
+        return None, "雲端環境不支援 Word 轉 PDF（docx2pdf）。請改下載 DOCX 後在本機轉 PDF。"
     try:
         import docx2pdf
     except Exception:
