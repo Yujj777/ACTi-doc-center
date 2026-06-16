@@ -1107,11 +1107,56 @@ def docx_bytes_to_pdf_bytes(docx_bytes: bytes) -> tuple[bytes | None, str | None
     將 docx 轉成 PDF bytes（docx2pdf，通常需本機安裝 Microsoft Word）。
     回傳 (pdf_bytes, 錯誤說明)；成功時錯誤說明為 None。
     """
-    # Streamlit Cloud runs on Linux; docx2pdf relies on Microsoft Word (Windows/macOS).
-    # Avoid confusing "pip install docx2pdf" prompts on Cloud where it won't work anyway.
     import sys
+    # Cloud/Linux: prefer LibreOffice headless conversion (packages.txt installs it on Streamlit Cloud).
     if sys.platform not in ("win32", "darwin"):
-        return None, "雲端環境不支援 Word 轉 PDF（docx2pdf）。請改下載 DOCX 後在本機轉 PDF。"
+        try:
+            import subprocess
+
+            tmp_dir = Path(tempfile.gettempdir())
+            uid = uuid.uuid4().hex
+            in_docx = tmp_dir / f"dl_{uid}.docx"
+            out_dir = tmp_dir / f"dl_{uid}_out"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            in_docx.write_bytes(docx_bytes)
+
+            # libreoffice / soffice converts to PDF on Linux
+            cmd = [
+                "soffice",
+                "--headless",
+                "--nologo",
+                "--nofirststartwizard",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                str(out_dir),
+                str(in_docx),
+            ]
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            candidates = list(out_dir.glob("*.pdf"))
+            if not candidates:
+                return None, "雲端轉 PDF 失敗：LibreOffice 未產生 PDF。"
+            pdf_path = candidates[0]
+            return pdf_path.read_bytes(), None
+        except FileNotFoundError:
+            return None, "雲端尚未安裝 LibreOffice（請確認 repo 根目錄有 packages.txt 且包含 libreoffice）。"
+        except Exception as e:
+            return None, f"雲端轉 PDF 失敗（LibreOffice）：{e}"
+        finally:
+            try:
+                in_docx.unlink(missing_ok=True)
+            except Exception:
+                pass
+            try:
+                if "out_dir" in locals():
+                    for p in out_dir.glob("*"):
+                        try:
+                            p.unlink(missing_ok=True)
+                        except Exception:
+                            pass
+                    out_dir.rmdir()
+            except Exception:
+                pass
     try:
         import docx2pdf
     except Exception:
