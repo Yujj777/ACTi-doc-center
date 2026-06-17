@@ -1,2 +1,4 @@
 libreoffice
 fonts-noto-cjk
+fonts-arphic-ukai
+fonts-arphic-uming

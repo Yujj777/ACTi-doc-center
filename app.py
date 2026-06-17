@@ -1102,6 +1102,17 @@ def init_session_state():
         st.session_state.last_auto_results = {}
 
 
+def _linux_pdf_conversion_env() -> dict:
+    """Fontconfig aliases so LibreOffice maps 標楷體 → AR PL UKai TW on Cloud Linux."""
+    import os
+
+    env = os.environ.copy()
+    fontconfig_file = Path(__file__).resolve().parent / "fontconfig" / "local.conf"
+    if fontconfig_file.is_file():
+        env["FONTCONFIG_FILE"] = str(fontconfig_file)
+    return env
+
+
 def docx_bytes_to_pdf_bytes(docx_bytes: bytes) -> tuple[bytes | None, str | None]:
     """
     將 docx 轉成 PDF bytes（docx2pdf，通常需本機安裝 Microsoft Word）。
@@ -1120,6 +1131,18 @@ def docx_bytes_to_pdf_bytes(docx_bytes: bytes) -> tuple[bytes | None, str | None
             out_dir.mkdir(parents=True, exist_ok=True)
             in_docx.write_bytes(docx_bytes)
 
+            env = _linux_pdf_conversion_env()
+            try:
+                subprocess.run(
+                    ["fc-cache", "-f"],
+                    check=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env,
+                )
+            except FileNotFoundError:
+                pass
+
             # libreoffice / soffice converts to PDF on Linux
             cmd = [
                 "soffice",
@@ -1132,7 +1155,7 @@ def docx_bytes_to_pdf_bytes(docx_bytes: bytes) -> tuple[bytes | None, str | None
                 str(out_dir),
                 str(in_docx),
             ]
-            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
             candidates = list(out_dir.glob("*.pdf"))
             if not candidates:
                 return None, "雲端轉 PDF 失敗：LibreOffice 未產生 PDF。"
