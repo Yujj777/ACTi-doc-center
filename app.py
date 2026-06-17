@@ -637,36 +637,152 @@ def _paragraph_font_size_pt(para, default: float = 14.0) -> float:
     for run in para.runs:
         if run.font.size is not None:
             return run.font.size.pt
+    try:
+        if para.style and para.style.font and para.style.font.size is not None:
+            return para.style.font.size.pt
+    except Exception:
+        pass
     return default
 
 
+def _spacing_element_from_ooxml(p_pr) -> object | None:
+    if p_pr is None:
+        return None
+    try:
+        from docx.oxml.ns import qn
+    except Exception:
+        return None
+    return p_pr.find(qn("w:spacing"))
+
+
+def _parse_spacing_element(spacing) -> tuple[str | None, float | None]:
+    if spacing is None:
+        return None, None
+    try:
+        from docx.oxml.ns import qn
+    except Exception:
+        return None, None
+
+    line = spacing.get(qn("w:line"))
+    if line is None:
+        return None, None
+    try:
+        line_val = int(line)
+    except (TypeError, ValueError):
+        return None, None
+
+    line_rule = spacing.get(qn("w:lineRule")) or "auto"
+    if line_rule == "auto":
+        return "auto", line_val / 240.0
+    if line_rule == "exact":
+        return "exact", line_val / 20.0
+    if line_rule == "atLeast":
+        return "atLeast", line_val / 20.0
+    return None, None
+
+
+def _paragraph_spacing_from_ooxml(para) -> tuple[str | None, float | None]:
+    """
+    從 Word OOXML 讀取段落行距（含樣式繼承）。
+    auto: 回傳倍率 (line/240)；exact/atLeast: 回傳點數 (twips/20)。
+    """
+    try:
+        from docx.oxml.ns import qn
+    except Exception:
+        return None, None
+
+    p_pr = para._element.pPr
+    spacing = _spacing_element_from_ooxml(p_pr)
+    if spacing is not None:
+        rule, value = _parse_spacing_element(spacing)
+        if rule is not None:
+            return rule, value
+
+    try:
+        style = para.style
+        if style is None:
+            return None, None
+        visited: set[int] = set()
+        while style is not None and id(style) not in visited:
+            visited.add(id(style))
+            style_p_pr = style.element.find(qn("w:pPr"))
+            style_spacing = _spacing_element_from_ooxml(style_p_pr)
+            rule, value = _parse_spacing_element(style_spacing)
+            if rule is not None:
+                return rule, value
+            style = getattr(style, "base_style", None)
+    except Exception:
+        pass
+    return None, None
+
+
+def _paragraph_in_table(para) -> bool:
+    el = para._element
+    while el is not None:
+        if el.tag.endswith("}tbl"):
+            return True
+        el = el.getparent()
+    return False
+
+
 def _tune_paragraph_spacing_for_libreoffice(para, *, default_pt: float = 14.0) -> None:
-    """LibreOffice 轉 PDF 時 CJK 字型度量不同，用固定行高讓預覽更接近 Word。"""
+    """
+    僅在段落沒有 OOXML 行距時，把 python-docx 讀到的倍率行距轉成固定值。
+    已有 w:spacing（含 auto / exact / atLeast）的段落一律保留，避免與 Word 不一致。
+    """
     try:
         from docx.enum.text import WD_LINE_SPACING
-        from docx.shared import Pt
+        from docx.shared import Length, Pt
     except Exception:
         return
+
+    rule, _value = _paragraph_spacing_from_ooxml(para)
+    if rule is not None:
+        return
+
     sz = _paragraph_font_size_pt(para, default_pt)
     pf = para.paragraph_format
-    pf.line_spacing_rule = WD_LINE_SPACING.EXACTLY
-    pf.line_spacing = Pt(sz)
+    ls_rule = pf.line_spacing_rule
+    ls = pf.line_spacing
+
+    if ls_rule == WD_LINE_SPACING.EXACTLY and isinstance(ls, Length):
+        return
+    if ls_rule == WD_LINE_SPACING.AT_LEAST and isinstance(ls, Length):
+        return
+    if ls_rule == WD_LINE_SPACING.MULTIPLE and ls is not None:
+        pf.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+        pf.line_spacing = Pt(sz * float(ls))
+        return
+    if ls_rule == WD_LINE_SPACING.ONE_POINT_FIVE:
+        pf.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+        pf.line_spacing = Pt(sz * 1.5)
+        return
+    if ls_rule == WD_LINE_SPACING.DOUBLE:
+        pf.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+        pf.line_spacing = Pt(sz * 2.0)
+        return
 
 
 def _docx_bytes_tune_for_libreoffice_pdf(docx_bytes: bytes) -> bytes:
-    """僅供雲端 PDF 預覽：調整行距，不影響下載的 Word 檔。"""
+    """僅供雲端 PDF 預覽：依 Word 原始行距轉換，不影響下載的 Word 檔。"""
     try:
         from docx import Document
+        from docx.oxml.ns import qn
+        from docx.text.paragraph import Paragraph
     except Exception:
         return docx_bytes
+
     doc = Document(BytesIO(docx_bytes))
-    for para in doc.paragraphs:
-        _tune_paragraph_spacing_for_libreoffice(para, default_pt=14.0)
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for para in cell.paragraphs:
-                    _tune_paragraph_spacing_for_libreoffice(para, default_pt=12.0)
+    for p_el in doc.element.body.iter(qn("w:p")):
+        para = Paragraph(p_el, doc)
+        default_pt = 12.0 if _paragraph_in_table(para) else 14.0
+        _tune_paragraph_spacing_for_libreoffice(para, default_pt=default_pt)
+
+    for section in doc.sections:
+        for hf in (section.header, section.footer):
+            for para in hf.paragraphs:
+                _tune_paragraph_spacing_for_libreoffice(para, default_pt=14.0)
+
     buf = BytesIO()
     doc.save(buf)
     return buf.getvalue()
