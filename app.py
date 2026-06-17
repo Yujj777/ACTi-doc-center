@@ -620,6 +620,58 @@ def sanitize_filename(s: str) -> str:
     return s[:120] if len(s) > 120 else s
 
 
+def build_download_filename(
+    doc_type: str,
+    *,
+    vendor_name: str,
+    use_unit: str,
+    chosen_date: date,
+) -> str:
+    """文件類型_廠商名稱或使用單位(廠商優先)_西元yyMMDD.docx"""
+    party = (vendor_name or "").strip() or (use_unit or "").strip() or "未命名"
+    safe_date = sanitize_filename(_taiwan_date_strings(chosen_date)["date_yyMMdd"])
+    return f"{sanitize_filename(doc_type)}_{sanitize_filename(party)}_{safe_date}.docx"
+
+
+def _paragraph_font_size_pt(para, default: float = 14.0) -> float:
+    for run in para.runs:
+        if run.font.size is not None:
+            return run.font.size.pt
+    return default
+
+
+def _tune_paragraph_spacing_for_libreoffice(para, *, default_pt: float = 14.0) -> None:
+    """LibreOffice 轉 PDF 時 CJK 字型度量不同，用固定行高讓預覽更接近 Word。"""
+    try:
+        from docx.enum.text import WD_LINE_SPACING
+        from docx.shared import Pt
+    except Exception:
+        return
+    sz = _paragraph_font_size_pt(para, default_pt)
+    pf = para.paragraph_format
+    pf.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    pf.line_spacing = Pt(sz)
+
+
+def _docx_bytes_tune_for_libreoffice_pdf(docx_bytes: bytes) -> bytes:
+    """僅供雲端 PDF 預覽：調整行距，不影響下載的 Word 檔。"""
+    try:
+        from docx import Document
+    except Exception:
+        return docx_bytes
+    doc = Document(BytesIO(docx_bytes))
+    for para in doc.paragraphs:
+        _tune_paragraph_spacing_for_libreoffice(para, default_pt=14.0)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    _tune_paragraph_spacing_for_libreoffice(para, default_pt=12.0)
+    buf = BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
 def build_context(
     use_unit: str,
     vendor_name: str,
@@ -1129,7 +1181,8 @@ def docx_bytes_to_pdf_bytes(docx_bytes: bytes) -> tuple[bytes | None, str | None
             in_docx = tmp_dir / f"dl_{uid}.docx"
             out_dir = tmp_dir / f"dl_{uid}_out"
             out_dir.mkdir(parents=True, exist_ok=True)
-            in_docx.write_bytes(docx_bytes)
+            pdf_docx_bytes = _docx_bytes_tune_for_libreoffice_pdf(docx_bytes)
+            in_docx.write_bytes(pdf_docx_bytes)
 
             env = _linux_pdf_conversion_env()
             try:
@@ -1328,9 +1381,12 @@ def ensure_rendered_docx_results(
             if has_cart:
                 for path in st.session_state.get("selected_template_paths", []) or []:
                     out = render_doc(path, context)
-                    safe_vendor = sanitize_filename(vendor_name) if vendor_name else "廠商"
-                    safe_date = sanitize_filename(_taiwan_date_strings(chosen_date)["date_yyMMdd"])
-                    file_name = f"{sanitize_filename(Path(path).stem)}_{safe_vendor}_{safe_date}.docx"
+                    file_name = build_download_filename(
+                        Path(path).stem,
+                        vendor_name=vendor_name,
+                        use_unit=use_unit,
+                        chosen_date=chosen_date,
+                    )
                     rendered_results[path] = {"bytes": out, "filename": file_name}
 
             if decl_selected and context.get("declaration_items"):
@@ -1343,7 +1399,12 @@ def ensure_rendered_docx_results(
                 if decl_tpl:
                     out = render_doc(decl_tpl, context)
                     name_prefix = ",".join(decl_selected)
-                    decl_filename = f"{name_prefix}自我宣告.docx"
+                    decl_filename = build_download_filename(
+                        f"{name_prefix}自我宣告",
+                        vendor_name=vendor_name,
+                        use_unit=use_unit,
+                        chosen_date=chosen_date,
+                    )
                     rendered_results[f"__DECL__::{name_prefix}"] = {"bytes": out, "filename": decl_filename}
 
             st.session_state.last_auto_results = rendered_results
@@ -1740,12 +1801,12 @@ def main():
 
         if payload_btn:
             docx_b = payload_btn["bytes"]
-            base_stem = Path(payload_btn["filename"]).stem
+            download_name = payload_btn["filename"]
             with _pv_head_right:
                 st.download_button(
                     label="下載 Word",
                     data=docx_b,
-                    file_name=f"{base_stem}.docx",
+                    file_name=download_name,
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True,
                     key="pv_dl_docx",
